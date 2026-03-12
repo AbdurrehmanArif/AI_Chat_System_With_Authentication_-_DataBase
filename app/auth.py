@@ -1,40 +1,63 @@
-# app/auth.py
-import hashlib
-from datetime import datetime, timedelta
 from passlib.context import CryptContext
-from jose import jwt
-from app.core.config import settings
+from jose import jwt, JWTError
+from datetime import datetime, timedelta
 
-# Password hashing context
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+
+from app.core.config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
+
+
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# Max bcrypt input bytes (not needed for SHA256 pre-hash, but kept for reference)
-MAX_BCRYPT_BYTES = 72
 
-def hash_password(password: str) -> str:
-    """
-    Hash a plain password using SHA-256 + bcrypt.
-    """
-    # SHA256 raw bytes (32 bytes)
-    sha256_pw = hashlib.sha256(password.encode("utf-8")).digest()
-    # Hash with bcrypt
-    return pwd_context.hash(sha256_pw)
+security = HTTPBearer()
 
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """
-    Verify a plain password against the hashed password.
-    """
-    sha256_pw = hashlib.sha256(plain_password.encode("utf-8")).digest()
-    return pwd_context.verify(sha256_pw, hashed_password)
 
-def create_access_token(data: dict, expires_delta: timedelta = None) -> str:
-    """
-    Create a JWT access token.
-    """
+def hash_password(password: str):
+    return pwd_context.hash(password)
+
+
+def verify_password(plain_password: str, hashed_password: str):
+    return pwd_context.verify(plain_password, hashed_password)
+
+
+def create_access_token(data: dict):
+
     to_encode = data.copy()
-    expire = datetime.utcnow() + (
-        expires_delta if expires_delta else timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    )
+
+    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+
     to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
-    return encoded_jwt
+
+    token = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+    return token
+
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+
+    token = credentials.credentials
+
+    try:
+
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+
+        user_id = payload.get("user_id")
+
+        if user_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token"
+            )
+
+        return user_id
+
+    except JWTError:
+
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token"
+        )
